@@ -1,0 +1,5 @@
+module load openmpi
+make clean
+make
+sbatch poisson.sbatch         #submit the job
+
