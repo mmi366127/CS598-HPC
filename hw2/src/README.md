@@ -73,6 +73,72 @@ across every shape tested. `bench_transpose` compares it against the
 naive version; expect roughly 1.2x-1.8x, largest for tall-thin shapes.
 
 
+## Distributed transpose (`transpose_mpi`)
+
+`transpose_mpi(nx,ny,A_local,B_local,strategy)` pivots an `nx x ny`
+x-row-blocked array into a `ny x nx` y-row-blocked one. The diagonal
+block is always local; the off-diagonal blocks move by one of three
+strategies:
+
+| strategy | messages/rank | bytes/rank | idea |
+|---|---|---|---|
+| `DEALING_SIMULTANEOUS` | P-1 | 1x | all isend/irecv posted at once, one `msgwait` (lec05 p.6 hotspot) |
+| `DEALING_STAGGERED` | P-1 | 1x | P rounds, partner `(r-p) mod P`, one `msgwait` per round |
+| `CRYSTAL_ROUTER` | ~log2(P) | up to log2(P)x | recursive bisection, relaying through intermediate ranks (lec06, Fox et al. '88) |
+
+Both dealing variants send every block straight to its owner. The
+crystal router instead bisects the rank range `ceil(log2(P))` times; in
+each round a rank makes one exchange across the cut, handing over
+everything bound for the far side -- its own blocks and the ones it is
+relaying. Since blocks pass through ranks they are not addressed to,
+each moves as a self-describing packet (a `(src,dest)` header plus the
+`Ms x Qdest` payload; both dimensions follow from `block_bounds` on the
+header). Each round is a size exchange followed by a payload exchange,
+because `msg.h`'s `irecv` needs the byte count up front and a relayed
+pool has no size the receiver can predict.
+
+Non-power-of-two `P` is handled directly rather than by padding: an
+odd-length range leaves the upper half's last rank unpaired, so it
+sends its lower-half-bound packets to the range's first rank and
+receives nothing that round -- traffic addressed to it still arrives
+through the later rounds that bisect the upper half.
+
+The tradeoff is latency vs. bandwidth: the crystal router replaces
+`P-1` messages with `~log2(P)`, but forwards a block up to `log2(P)`
+times. Expect it to win at large `P` with small per-pair blocks and
+lose when the transpose is bandwidth-bound.
+
+`test_transpose_mpi [nx] [ny] [nrep]` checks all three against a
+closed-form `A(i,j)` and reports best-of-`nrep` times.
+
+
+## Benchmarking the parallel solve
+
+    bench_poisson_mpi [Nx] [Ny] [strategy] [nrep]     # strategy: 0,1,2
+
+One sweep point per invocation; `poisson.sbatch` loops over sizes,
+rank counts and strategies and `tabulate_bench.py` turns the resulting
+`BENCH` lines into per-size tables.
+
+`poisson_solve_mpi` fills `p.t` (see `poisson_mpi.h`) with a per-rank
+breakdown of the last solve -- `fst_y`, `fst_x`, `transpose`, `divide`
+-- and the transpose is further split into `tr_msg` / `tr_pack` /
+`tr_local` straight out of `transpose_mpi`'s own counters, so the
+message time, the crystal router's relay packing, and the local
+`transpose_real` work are all separable. `p.verbose = 0` silences the
+per-solve printf.
+
+The driver reports the breakdown of the rank with the largest total --
+the critical path -- rather than a per-component max across ranks,
+which would mix components measured on different ranks and not add up
+to the whole. `tmin` (the fastest rank's total) rides along so the
+load spread stays visible.
+
+Restriction: every rank must own at least one x-row and one y-row, so
+`P <= nx`. `block_fst_plan_init` requires `m >= 1` and rejects an empty
+local slice; the sweep skips those points.
+
+
 ## Poisson solver
 
     -Laplacian u = f   on [0,Lx] x [0,Ly],   u = 0 on the boundary

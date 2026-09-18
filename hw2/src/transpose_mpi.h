@@ -37,13 +37,22 @@
  *     order alone can't stagger traffic -- an actual msgwait per
  *     round is what forces the rounds apart in time.
  *
- * A third, structurally different algorithm -- the Crystal Router
- * (lec06, Fox et al. '88): log2(P) rounds of recursive bisection
- * exchange instead of P direct exchanges -- is not implemented here.
+ * The third strategy is structurally different:
+ *
+ *   CRYSTAL_ROUTER -- lec06, Fox et al. '88.  ceil(log2(P)) rounds of
+ *     recursive bisection: each round every rank does ONE exchange
+ *     across the current cut, handing its partner everything bound
+ *     for the far side, including blocks it is merely relaying for
+ *     other ranks.  Messages per rank fall from P-1 to ~log2(P) at
+ *     the cost of forwarding a block up to log2(P) times, so it wins
+ *     when the transpose is latency-bound (large P, small blocks) and
+ *     loses when it is bandwidth-bound.  See transpose_mpi.c for the
+ *     packet format and the non-power-of-two handling.
  */
 typedef enum {
     TRANSPOSE_MPI_DEALING_SIMULTANEOUS = 0,
-    TRANSPOSE_MPI_DEALING_STAGGERED    = 1
+    TRANSPOSE_MPI_DEALING_STAGGERED    = 1,
+    TRANSPOSE_MPI_CRYSTAL_ROUTER       = 2
 } transpose_mpi_strategy;
 
 /* Split n items across P ranks as evenly as possible: rank p gets
@@ -56,5 +65,26 @@ void transpose_mpi(int nx, int ny,
                     const double * restrict A_local,
                     double * restrict B_local,
                     transpose_mpi_strategy strategy);
+
+/*----------------------------------------------------------------------
+ *  Profiling counters.  Accumulated over every transpose_mpi() call
+ *  since the last reset, so a caller can bracket a whole solve and
+ *  still see where the transpose time went.  These are per-rank wall
+ *  times -- reduce across ranks in the caller if a global figure is
+ *  wanted.  `total` is the full call; the other three sum to it up to
+ *  timer overhead:
+ *
+ *    msg   -- posting isend/irecv and blocking in msgwait
+ *    pack  -- packing/splitting relay buffers (crystal router only;
+ *             the dealing variants send straight out of A_local)
+ *    local -- transpose_real() on the diagonal block and on each
+ *             block that has arrived
+ *--------------------------------------------------------------------*/
+typedef struct {
+    double total, msg, pack, local;
+} transpose_mpi_prof;
+
+void transpose_mpi_prof_reset(void);
+void transpose_mpi_prof_get(transpose_mpi_prof *out);
 
 #endif

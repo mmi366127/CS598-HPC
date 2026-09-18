@@ -42,16 +42,20 @@ int main(int argc, char **argv)
     if (argc>2) Ny = atoi(argv[2]);
     if (argc>3) Lx = atof(argv[3]);
     if (argc>4) Ly = atof(argv[4]);
-    if (argc>5) strat = atoi(argv[5]) ? TRANSPOSE_MPI_DEALING_STAGGERED
-                                       : TRANSPOSE_MPI_DEALING_SIMULTANEOUS;
+    if (argc>5) {
+        const int k = atoi(argv[5]);
+        strat = (k==2) ? TRANSPOSE_MPI_CRYSTAL_ROUTER
+              : (k==1) ? TRANSPOSE_MPI_DEALING_STAGGERED
+                       : TRANSPOSE_MPI_DEALING_SIMULTANEOUS;
+    }
     const int nx=Nx-1, ny=Ny-1;
 
     if (poisson_plan_mpi_init(&p,nx,ny,Lx,Ly,strat)) return 1;
 
     if (rank==0) {
-        printf("running on %d rank(s), strategy=%s\n", P,
-               strat==TRANSPOSE_MPI_DEALING_STAGGERED ? "dealing-staggered"
-                                                        : "dealing-simultaneous");
+        static const char *sname[3] =
+            {"dealing-simultaneous","dealing-staggered","crystal-router"};
+        printf("running on %d rank(s), strategy=%s\n", P, sname[(int)strat]);
         printf("domain  [0,%g] x [0,%g]\n",Lx,Ly);
         printf("nx ny   = %d %d      (Nx Ny = %d %d)\n",nx,ny,Nx,Ny);
         printf("hx hy   = %.6e %.6e\n",p.hx,p.hy);

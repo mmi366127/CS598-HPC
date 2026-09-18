@@ -14,8 +14,8 @@ echo "== serial baseline (test_poisson, P=1) =="
 mpirun -np 1 --map-by ppr:1:node --bind-to core ./test_poisson 128 512
 
 for P in 1 2 4 8 16; do
-    for strat in 1 0; do
-        name=$([ "$strat" = 1 ] && echo staggered || echo simultaneous)
+    for strat in 1 0 2; do
+        name=$(case $strat in 1) echo staggered;; 0) echo simultaneous;; 2) echo crystal;; esac)
         echo
         echo "== test_poisson_mpi  P=$P  strategy=$name =="
         mpirun -np $P --map-by ppr:$P:node --bind-to core \

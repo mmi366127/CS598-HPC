@@ -23,6 +23,28 @@
  *  full nx x ny array.
  *====================================================================*/
 
+/*----------------------------------------------------------------------
+ *  Per-rank wall-clock breakdown of the last poisson_solve_mpi() call.
+ *  The phases partition the timed region (steps 1-7) up to timer
+ *  overhead:  total = fst_y + fst_x + transpose + divide.
+ *  `copy` is the untimed F->A / A->U marshalling around it, reported
+ *  separately so it is visible rather than hidden.
+ *
+ *  tr_msg/tr_pack/tr_local subdivide `transpose` exactly as
+ *  transpose_mpi_prof does (message time, relay packing, local
+ *  transpose_real work) -- this is where the dealing-vs-crystal
+ *  difference shows up.
+ *--------------------------------------------------------------------*/
+typedef struct {
+    double total;                        /* steps 1-7                  */
+    double fst_y;                        /* steps 1 and 7              */
+    double fst_x;                        /* steps 3 and 5              */
+    double transpose;                    /* steps 2 and 6              */
+    double tr_msg, tr_pack, tr_local;    /* subdivision of transpose   */
+    double divide;                       /* step 4                     */
+    double copy;                         /* F->A and A->U              */
+} poisson_mpi_times;
+
 typedef struct {
     int    nx, ny;                 /* GLOBAL grid size                  */
     double Lx, Ly, hx, hy;
@@ -33,6 +55,8 @@ typedef struct {
     double *lamx, *lamy;            /* full-length, nx and ny             */
     double *A, *B;                  /* Mp x ny  and  Qp x nx local scratch */
     transpose_mpi_strategy strategy;
+    poisson_mpi_times t;            /* breakdown of the last solve       */
+    int    verbose;                 /* 1 = print a line per solve (default) */
 } poisson_plan_mpi;
 
 int  poisson_plan_mpi_init(poisson_plan_mpi *p,
