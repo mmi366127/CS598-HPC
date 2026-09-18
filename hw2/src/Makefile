@@ -11,7 +11,7 @@ MAKEFLAGS += -r   # disable make's built-in implicit rules, so a config
 # msg_mpi.o goes into COMMON_OBJS -- every executable below links it,
 # since all three share poisson.o through COMMON_OBJS.
 COMMON_OBJS = block_fft.o block_fst.o transpose.o transpose_mpi.o poisson.o msg_mpi.o
-EXES        = test_block_fst test_poisson bench_transpose test_transpose_mpi test_poisson_mpi verify_poisson
+EXES        = test_block_fst test_poisson bench_transpose test_transpose_mpi test_poisson_mpi bench_poisson_mpi verify_poisson
 
 all: $(EXES) asm
 
@@ -32,6 +32,9 @@ test_transpose_mpi: $(COMMON_OBJS) test_transpose_mpi.o
 # unmodified serial reference used for correctness and as the P=1
 # baseline for parallel-efficiency comparisons later.
 test_poisson_mpi: $(COMMON_OBJS) poisson_mpi.o test_poisson_mpi.o
+	$(MPICC) $(CFLAGS_COMMON) $(CFLAGS_OPT) -o $@ $^ $(LIBS)
+
+bench_poisson_mpi: $(COMMON_OBJS) poisson_mpi.o bench_poisson_mpi.o
 	$(MPICC) $(CFLAGS_COMMON) $(CFLAGS_OPT) -o $@ $^ $(LIBS)
 
 verify_poisson: $(COMMON_OBJS) verify_poisson.o

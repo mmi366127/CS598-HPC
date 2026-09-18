@@ -89,12 +89,16 @@ int main(int argc, char **argv)
     if (rank==0)
         printf("transpose_mpi correctness: nx=%d ny=%d P=%d\n",nx,ny,P);
 
-    static const char *names[2] = {"dealing-simultaneous","dealing-staggered"};
-    static const transpose_mpi_strategy strats[2] =
-        { TRANSPOSE_MPI_DEALING_SIMULTANEOUS, TRANSPOSE_MPI_DEALING_STAGGERED };
+    static const char *names[3] =
+        {"dealing-simultaneous","dealing-staggered","crystal-router"};
+    static const transpose_mpi_strategy strats[3] =
+        { TRANSPOSE_MPI_DEALING_SIMULTANEOUS,
+          TRANSPOSE_MPI_DEALING_STAGGERED,
+          TRANSPOSE_MPI_CRYSTAL_ROUTER };
+    const int nstrat = (int)(sizeof strats / sizeof strats[0]);
 
     int s, any_fail = 0;
-    for (s=0; s<2; ++s) {
+    for (s=0; s<nstrat; ++s) {
         double emax, tbest;
         run_case(nx,ny,P,rank,strats[s],nrep,&emax,&tbest);
 
@@ -105,11 +109,11 @@ int main(int argc, char **argv)
         if (fail_any) any_fail = 1;
 
         if (fail_local)
-            printf("  [rank %d] %-8s FAIL max|err| = %.3e\n",
+            printf("  [rank %d] %-20s FAIL max|err| = %.3e\n",
                    rank, names[s], emax);
 
         if (rank==0)
-            printf("  %-8s  best time %10.3e s  %s\n",
+            printf("  %-20s best time %10.3e s  %s\n",
                    names[s], tbest, fail_any ? "FAIL" : "PASS");
     }
 
