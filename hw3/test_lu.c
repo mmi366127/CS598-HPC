@@ -1,4 +1,4 @@
-/* usage: mpirun -np P*Q ./test_lu [N=129] [P=1] [Q=ranks/P] [check=1]
+/* usage: mpirun -np P*Q ./test_lu [N=129] [P=1] [Q=ranks/P] [b=32] [b=32] [check=1]
  * Test matrix: A = S + a I, S_ij = sqrt(2/N) sin(pi i j / N), a = N, n = N-1. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,7 +23,8 @@ int main(int argc, char **argv)
     int N  = argc > 1 ? atoi(argv[1]) : 129;
     int P  = argc > 2 ? atoi(argv[2]) : 2;
     int Q  = argc > 3 ? atoi(argv[3]) : np / P;
-    int check = argc > 4 ? atoi(argv[4]) : 1;
+    int b  = argc > 4 ? atoi(argv[4]) : 32;
+    int check = argc > 5 ? atoi(argv[5]) : 1;
     if (P*Q != np) {
         if (!rank) fprintf(stderr, "P*Q (%d*%d) != ranks (%d)\n", P, Q, np);
         msg_finalize(); return 1;
@@ -37,13 +38,13 @@ int main(int argc, char **argv)
 
     msg_barrier();
     double t = msg_wtime();
-    lu_factor_mpi(&d);
+    lu_factor_mpi(&d, b);
     msg_barrier();
     t = msg_wtime() - t;
 
     double *G = lu_gather(&d);
     if (!rank) {
-        printf("n=%d grid=%dx%d time=%.4fs GFLOPS=%.2f", n, P, Q, t,
+        printf("n=%d grid=%dx%d b=%d time=%.4fs GFLOPS=%.2f", n, P, Q, b, t,
                (2.0/3.0)*n*(double)n*n/t*1e-9);
         if (check) {
             /* ||A - LU||_max / ||A||_max, and diff vs serial LU */

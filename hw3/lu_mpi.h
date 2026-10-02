@@ -23,8 +23,10 @@ void lu_dist_alloc(lu_dist *d, int n, int P, int Q, int rank);
 void lu_dist_free(lu_dist *d);
 void lu_dist_fill(lu_dist *d, double (*f)(int i, int j));
 
-/* In-place LU: L (unit lower) and U stored in a. */
-void lu_factor_mpi(lu_dist *d);
+/* In-place LU: L (unit lower) and U stored in a.
+ * b = block size: b rank-1 updates are delayed and applied by one dgemm
+ * (b=1 is a plain rank-1 update per step). */
+void lu_factor_mpi(lu_dist *d, int b);
 
 /* Gather full n x n matrix (row-major) on rank 0; returns NULL elsewhere. */
 double *lu_gather(const lu_dist *d);
