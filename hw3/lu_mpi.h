@@ -2,23 +2,24 @@
 #define LU_MPI_H
 
 /*
- * Distributed LU (no pivoting) on a (P,Q) process grid, 2D block-cyclic
- * ("scattered") layout with nb x nb blocks. Rank r sits at grid position
- * (r / Q, r % Q). Global block (I,J) lives on process (I % P, J % Q).
+ * Distributed LU (no pivoting) on a (P,Q) process grid, scattered
+ * (cyclic) layout: global element (i,j) lives on process (i % P, j % Q),
+ * i.e. the matrix is tiled by P x Q tiles and each process owns one
+ * entry of every tile. Rank r sits at grid position (r / Q, r % Q).
  * Local storage is row-major, ld = nloc.
  */
 typedef struct {
-    int n, nb, P, Q, p, q;
+    int n, P, Q, p, q;
     int mloc, nloc;     /* local rows / cols */
     double *a;          /* mloc x nloc, row-major */
 } lu_dist;
 
-/* number of local indices (of n, block nb, proc coord c of C) below global index g */
-int lu_local_below(int g, int n, int nb, int c, int C);
-/* global index of local index li */
-int lu_global(int li, int nb, int c, int C);
+/* number of indices < g (g <= n) owned by grid coordinate c of C */
+int lu_local_below(int g, int c, int C);
+/* global index of local index li on grid coordinate c of C */
+int lu_global(int li, int c, int C);
 
-void lu_dist_alloc(lu_dist *d, int n, int nb, int P, int Q, int rank);
+void lu_dist_alloc(lu_dist *d, int n, int P, int Q, int rank);
 void lu_dist_free(lu_dist *d);
 void lu_dist_fill(lu_dist *d, double (*f)(int i, int j));
 
