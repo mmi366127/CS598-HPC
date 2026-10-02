@@ -225,42 +225,66 @@ def panels(rows, out, key, ylabel, title, subtitle, shared, ideal=False):
 
 
 # ----------------------------------------------------------------- fig 4
-def fig_efficiency(rows, out):
-    """One panel per configuration: if the efficiency loss were purely a
-    per-rank problem-size effect, each panel's curves would collapse."""
-    cfgs = [c for c in ("1n", "2n", "pin")
-            if any(r["cfg"] == c for r in rows)]
+def fig_efficiency(rows, out,
+                   xfun=lambda N, P: N * N / P,
+                   xlabel="grid points per rank,   n / P      (n = Nx" + CDOT + "Ny)",
+                   title="Efficiency against per-rank problem size",
+                   xnote="fewer points per rank"):
+    """Efficiency as the share of the solve NOT spent communicating,
+
+        eta = (T_total - T_comm) / T_total,   T_comm = the transpose step,
+
+    measured within each run.  Unlike T(1)/(P*T(P)) it needs no serial
+    baseline, so it is immune to the size-dependent FFT rate (cache wins
+    at 2048^2, slab-stride losses at 8192^2 and 32768^2) that kept the
+    classic curves from collapsing -- see figure 7.  It cannot exceed
+    100%, and P=1 sits just below 100% because the local diagonal
+    transpose still counts as data movement.  One panel per configuration.
+    """
+    cfgs = [c for c in ("1n", "2n") if any(r["cfg"] == c for r in rows)]
     fig, axes = newfig(1, len(cfgs), figsize=(6.0 * len(cfgs), 6.0))
     if len(cfgs) == 1:
         axes = [axes]
-    base = {(r["N"], r["s"], r["cfg"]): r["total"] for r in rows if r["P"] == 1}
+    eff = lambda r: 100.0 * (r["total"] - r["transpose"]) / r["total"]
+    THRESH = 80
+    crossings = []
 
     for ax, cfg in zip(axes, cfgs):
         ax.axhline(100, color=GUIDE, linewidth=1.4, linestyle=(0, (5, 4)), zorder=2)
         for s in (1, 2):
             for N in sorted({r["N"] for r in rows if r["cfg"] == cfg}):
-                b = base.get((N, s, cfg))
-                if not b:
-                    continue
-                pts = sorted([((N - 1) * (N - 1) / r["P"],
-                               100 * b / (r["P"] * r["total"]))
-                              for r in rows
+                pts = sorted([(xfun(N, r["P"]), eff(r)) for r in rows
                               if r["N"] == N and r["s"] == s and r["cfg"] == cfg])
+                if not pts:
+                    continue
                 xs, ys = zip(*pts)
                 ax.plot(xs, ys, color=SERIES[s], linewidth=1.1, alpha=0.45, zorder=3)
                 ax.plot(xs, ys, color=SERIES[s], linestyle="none",
                         marker=MARKER_BY_N[N], markersize=7.5,
                         markeredgecolor=SURFACE, markeredgewidth=1.1, zorder=4)
+                # Where this curve crosses the threshold: linear in
+                # efficiency, logarithmic in x, between neighbouring points.
+                for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+                    if (y0 - THRESH) * (y1 - THRESH) < 0:
+                        t = (THRESH - y0) / (y1 - y0)
+                        xc = 10 ** (math.log10(x0) + t * math.log10(x1 / x0))
+                        ax.plot([xc], [THRESH], linestyle="none",
+                                marker=MARKER_BY_N[N], markersize=9,
+                                markerfacecolor=SURFACE, markeredgecolor=SERIES[s],
+                                markeredgewidth=1.8, zorder=6)
+                        crossings.append((cfg, SNAME[s], N, xc,
+                                          "up" if y1 > y0 else "down"))
+        ax.axhline(THRESH, color=INK_2, linewidth=1.1, linestyle=(0, (1, 2)),
+                   zorder=2)
+        ax.annotate("%d%%" % THRESH, (ax.get_xlim()[0], THRESH),
+                    textcoords="offset points", xytext=(4, 4),
+                    color=INK_2, fontsize=9)
         ax.set_xscale("log")
-        ax.set_ylim(0, 135)
-        name = {"1n": "1 node (unpinned)", "2n": "2 nodes, P/2 each (unpinned)",
-                "pin": "1 node (pinned)"}[cfg]
-        style(ax, "grid points per rank,   nx" + CDOT + "ny / P",
-              "parallel efficiency  T(1) / (P" + CDOT + "T(P))    [%]"
+        ax.set_ylim(0, 108)
+        name = {"1n": "1 node (unpinned)", "2n": "2 nodes, P/2 each (unpinned)"}[cfg]
+        style(ax, xlabel,
+              "efficiency  (T_total " + MINUS + " T_comm) / T_total    [%]"
               if cfg == cfgs[0] else "", name)
-        ax.annotate("ideal (100%)", (ax.get_xlim()[0] * 2.0, 100),
-                    textcoords="offset points", xytext=(0, 6),
-                    color=INK_2, fontsize=8.5)
 
     hs = [Line2D([], [], color=SERIES[s], linewidth=2, marker="o", markersize=7,
                  markeredgecolor=SURFACE, label=SNAME[s]) for s in (1, 2)]
@@ -268,18 +292,22 @@ def fig_efficiency(rows, out):
     hs += [Line2D([], [], color=INK_2, linestyle="none", marker=MARKER_BY_N[N],
                   markersize=7, markeredgecolor=SURFACE, label="Nx = %d" % N)
            for N in sorted(MARKER_BY_N)]
-    leg = fig.legend(handles=hs, loc="lower center", ncol=9, frameon=False,
-                     fontsize=9.5, labelcolor=INK, bbox_to_anchor=(0.5, 0.005))
-    fig.suptitle("Efficiency against per-rank problem size",
-                 color=INK, fontsize=13.5, x=0.008, ha="left", y=0.975)
+    fig.legend(handles=hs, loc="lower center", ncol=9, frameon=False,
+               fontsize=9.5, labelcolor=INK, bbox_to_anchor=(0.5, 0.005))
+    fig.suptitle(title, color=INK, fontsize=13.5, x=0.008, ha="left", y=0.975)
     fig.text(0.008, 0.895,
-             "Colour = strategy, shape = grid size.  Along each curve P grows to "
-             "the LEFT (fewer points per rank).\nAbove 100% is superlinear speedup: "
-             "the P=1 baseline thrashes cache that the split problem fits into.",
+             "Efficiency = share of the solve not spent in the transpose, measured "
+             "within each run (no serial baseline).  Colour = strategy, shape = "
+             "grid size.\nAlong each curve P grows to the LEFT (" + xnote + ").  "
+             "Dashed line = no communication; dotted = 80%, hollow markers = "
+             "where each curve crosses it.",
              color=INK_2, fontsize=9)
     fig.tight_layout(rect=(0, 0.075, 1, 0.86))
     fig.savefig(out, dpi=150, facecolor=SURFACE)
     print("wrote", out)
+    for c in crossings:
+        print("  %d%% crossing  %-3s %-18s Nx=%-6d x=%.3g  (%s)"
+              % ((THRESH,) + c))
 
 
 # ----------------------------------------------------------------- fig 5
@@ -456,6 +484,106 @@ def fig_eta(rows, out, cfg="2n"):
     print("wrote", out)
 
 
+# ----------------------------------------------------------------- fig 7
+def _collapse_rms(xs, ys):
+    """RMS residual (percentage points) of the two-parameter sigmoid
+    E = 100 / (1 + (x0/x)^k) fitted in log x.  Scale-free in x, so every
+    candidate variable is judged on its shape alone."""
+    import numpy as np
+    from scipy.optimize import least_squares
+    lx, ys = np.log10(np.asarray(xs)), np.asarray(ys)
+    fit = least_squares(lambda p: 100 / (1 + 10 ** (p[1] * (p[0] - lx))) - ys,
+                        [float(np.median(lx)), 1.0])
+    return float(np.sqrt(np.mean(fit.fun ** 2)))
+
+
+def fig_collapse(rows, out, cfg="2n"):
+    """Does efficiency collapse onto one curve, and against what?
+    (n = Nx*Ny, the total number of grid points.)
+
+    (a) standard efficiency vs n/P            -- the figure-4 view
+    (b) standard efficiency vs n log n / P  -- FFT work per rank
+    (c) compute share vs n log n / P^2      -- FFT work per message
+
+    (a) and (b) score the same (~30 points of scatter): log n spans only
+    10..30 over these grids (a factor of 3), far too little to re-order six decades of
+    n/P.  The real obstacle is that the local FFT does not run at a
+    constant rate per unit of n log n / P -- it is up to ~30% faster
+    than serial at 2048^2 (cache) and 1.2-9x slower at 8192^2 and 32768^2
+    (power-of-two slab strides, short slabs) -- so the measured T(1) is
+    not a clean c n log n.  (c) measures the loss against the FFT time
+    achieved in the SAME run, T_fft / (T_fft + T_comm), which removes the
+    FFT-rate variation; what is left is communication, and it collapses
+    on FFT work per rank over message count, as the alpha-beta model
+    T_comm / T_fft ~ P^2 alpha / (c n log n) + beta / (c log n) predicts.
+    P=1 points are excluded (100% by definition in every view).
+    """
+    L2 = math.log2
+    pts = [r for r in rows if r["cfg"] == cfg and r["P"] > 1]
+    base = {(r["N"], r["s"]): r["total"] for r in rows
+            if r["cfg"] == cfg and r["P"] == 1}
+    views = [
+        ("(a)  efficiency  vs  work per rank",
+         lambda r: r["N"] ** 2 / r["P"],
+         lambda r: 100 * base[(r["N"], r["s"])] / (r["P"] * r["total"]),
+         "n / P      (n = Nx" + CDOT + "Ny)",
+         "parallel efficiency  T(1) / (P" + CDOT + "T(P))   [%]"),
+        ("(b)  efficiency  vs  FFT work per rank",
+         lambda r: r["N"] ** 2 * L2(r["N"] ** 2) / r["P"],
+         lambda r: 100 * base[(r["N"], r["s"])] / (r["P"] * r["total"]),
+         "n log" + SUB2 + " n / P", ""),
+        ("(c)  compute share  vs  FFT work per message",
+         lambda r: r["N"] ** 2 * L2(r["N"] ** 2) / r["P"] ** 2,
+         lambda r: 100 * (r["fst_y"] + r["fst_x"] + r["divide"]) / r["total"],
+         "n log" + SUB2 + " n / P" + SUP2,
+         "T_fft / (T_fft + T_comm)   [%]"),
+    ]
+    fig, axes = newfig(1, 3, figsize=(17.5, 6.2))
+    for ax, (title, fx, fy, xl, yl) in zip(axes, views):
+        rms = {}
+        for st in (1, 2):
+            sub = [r for r in pts if r["s"] == st]
+            rms[st] = _collapse_rms([fx(r) for r in sub], [fy(r) for r in sub])
+            for N in sorted({r["N"] for r in sub}):
+                line = sorted(((fx(r), fy(r)) for r in sub if r["N"] == N))
+                xs, ys = zip(*line)
+                ax.plot(xs, ys, color=SERIES[st], linewidth=1.0, alpha=0.4, zorder=3)
+                ax.plot(xs, ys, color=SERIES[st], linestyle="none",
+                        marker=MARKER_BY_N[N], markersize=7,
+                        markeredgecolor=SURFACE, markeredgewidth=1.0, zorder=4)
+        ax.axhline(100, color=GUIDE, linewidth=1.2, linestyle=(0, (5, 4)), zorder=2)
+        ax.set_xscale("log")
+        ax.set_ylim(0, 135)
+        style(ax, xl, yl, title)
+        ax.text(0.03, 0.97,
+                "collapse scatter (RMS)\ndealing %.1f pts   crystal %.1f pts"
+                % (rms[1], rms[2]),
+                transform=ax.transAxes, ha="left", va="top", color=INK_2,
+                fontsize=9, bbox=dict(facecolor=SURFACE, edgecolor=GRID,
+                                      boxstyle="round,pad=0.45"))
+
+    hs = [Line2D([], [], color=SERIES[st], linewidth=2, marker="o", markersize=7,
+                 markeredgecolor=SURFACE, label=SNAME[st]) for st in (1, 2)]
+    hs += [Line2D([], [], linestyle="none", label="")]
+    hs += [Line2D([], [], color=INK_2, linestyle="none", marker=MARKER_BY_N[N],
+                  markersize=7, markeredgecolor=SURFACE, label="Nx = %d" % N)
+           for N in sorted(MARKER_BY_N)]
+    fig.legend(handles=hs, loc="lower center", ncol=9, frameon=False,
+               fontsize=9.5, labelcolor=INK, bbox_to_anchor=(0.5, 0.005))
+    fig.suptitle("What collapses the efficiency curves?",
+                 color=INK, fontsize=13.5, x=0.008, ha="left", y=0.975)
+    fig.text(0.008, 0.895,
+             "2 nodes, P/2 ranks each, P > 1.  Scatter = RMS residual of one sigmoid "
+             "fitted per strategy in log x (lower = tighter collapse).\n"
+             "(a)-(b): rescaling by log n cannot help because the local FFT itself "
+             "does not run at a constant rate across sizes.  (c) divides out the FFT "
+             "time each run actually achieved.",
+             color=INK_2, fontsize=9)
+    fig.tight_layout(rect=(0, 0.075, 1, 0.86))
+    fig.savefig(out, dpi=150, facecolor=SURFACE)
+    print("wrote", out)
+
+
 def main():
     dst = sys.argv[1] if len(sys.argv) > 1 else "../plots"
     os.makedirs(dst, exist_ok=True)
@@ -479,8 +607,19 @@ def main():
            "Shared scale across panels.",
            shared=True, ideal=False)
     fig_efficiency(rows, dst + "/4_efficiency_vs_work_per_rank.png")
+    # Same efficiency, x = FFT work per rank divided by message count:
+    # the variable the alpha-beta model predicts for the comm/compute
+    # ratio with n = Nx*Ny total points:
+    #   T_comm/T_fft ~ P^2 alpha/(c n log n) + beta/(c log n).
+    fig_efficiency(rows, dst + "/8_efficiency_vs_fft_work_per_msg.png",
+                   xfun=lambda N, P: N * N * math.log2(N * N) / P ** 2,
+                   xlabel="FFT work per message,   n log" + SUB2
+                          + " n / P" + SUP2 + "      (n = Nx" + CDOT + "Ny)",
+                   title="Efficiency against FFT work per message",
+                   xnote="less FFT work per message")
     fig_comm(rows, dst + "/5_communication_vs_P.png")
     fig_eta(rows, dst + "/6_comm_constant_eta.png")
+    fig_collapse(rows, dst + "/7_efficiency_collapse.png")
 
 
 main()
