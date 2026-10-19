@@ -68,23 +68,23 @@ int main(int argc, char **argv)
 
 
     // calculate error
-    double lh = 0.0, rh = 0.0, ufirst = u[0], ulast = u[local_size-1];
-    if (r > 0)     irecv(r - 1, &lh, sizeof lh, 1);
-    if (r < P - 1) irecv(r + 1, &rh, sizeof rh, 2);
-    if (r > 0)     isend(r - 1, &ufirst, sizeof ufirst, 2);
-    if (r < P - 1) isend(r + 1, &ulast, sizeof ulast, 1);
+    double lh = 0.0, rh = 0.0, xfirst = x[0], xlast = x[local_size-1];
+    if (p > 0)     irecv(p - 1, &lh, sizeof lh, 1);
+    if (p < P - 1) irecv(p + 1, &rh, sizeof rh, 2);
+    if (p > 0)     isend(p - 1, &xfirst, sizeof xfirst, 2);
+    if (p < P - 1) isend(p + 1, &xlast, sizeof xlast, 1);
     msgwait();
 
     double res = 0, fn = 0, err = 0, un = 0;
     for (int i = 0; i < local_size; i++) {
-        double um = i > 0 ? u[i-1] : lh;
-        double up = i < local_size - 1 ? u[i+1] : rh;
-        double au = a[i] * u[i];
-        if (start_idx + i > 0)     au += c[i] * um;
-        if (start_idx + i < n - 1) au += b[i] * up;
+        double xm = i > 0 ? x[i-1] : lh;
+        double xp = i < local_size - 1 ? x[i+1] : rh;
+        double ax = a[i] * x[i];
+        if (start_idx + i > 0)     ax += c[i] * xm;
+        if (start_idx + i < n - 1) ax += b[i] * xp;
         res = fmax(res, fabs(ax - f[i]));
         fn  = fmax(fn, fabs(f[i]));
-        err = fmax(err, fabs(u[i] - u_exact[i]));
+        err = fmax(err, fabs(x[i] - u_exact[i]));
         un  = fmax(un, fabs(u_exact[i]));
     }
 

@@ -3,7 +3,7 @@
 #include "msg.h"
 #include "tridiag_mpi.h"
 
-void tridiag_thomas(int n, const double *a, const double *b, const double *c,
+void tridiag_lu_solve(int n, const double *a, const double *b, const double *c,
                     const double *f, double *x, double *d)
 {
     /* d: modified diagonal; x doubles as the forward-sweep vector */
@@ -50,7 +50,7 @@ static void schur_solve(const double piece[6], double *yl, double *yr,
         sb[j] = Gn[1];              /* coeff of y_{j+1} */
         sf[j] = Gj[5] + Gn[2];
     }
-    tridiag_thomas(ns, sa, sb, sc, sf, y, sw);
+    tridiag_lu_solve(ns, sa, sb, sc, sf, y, sw);
     if (p > 0)      *yl = y[p - 1];
     if (p < P - 1)  *yr = y[p];
     free(mine);
@@ -83,9 +83,9 @@ void tridiag_solve_mpi(int k, const double *a, const double *b,
         free(pinv);
         free(fk_s);
         free(uk_s);
-        double *pinv = malloc((size_t)n * sizeof(double));
-        double *fk_s = malloc((size_t)n * sizeof(double));
-        double *uk_s = malloc((size_t)n * sizeof(double));
+        pinv = malloc((size_t)n * sizeof(double));
+        fk_s = malloc((size_t)n * sizeof(double));
+        uk_s = malloc((size_t)n * sizeof(double));
         work_cap = (size_t)n;
     }
 
