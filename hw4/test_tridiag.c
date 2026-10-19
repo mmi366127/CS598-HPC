@@ -54,6 +54,8 @@ int main(int argc, char **argv)
         u_exact[i] = exact_u(xi, Lx);
     }
 
+
+    // Solve, logging the best time
     tridiag_times t = {0}, tbest = {0};
     double best = 1e300;
     for (int it = 0; it < reps; it++) {

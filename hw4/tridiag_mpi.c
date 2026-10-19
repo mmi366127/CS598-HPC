@@ -19,9 +19,6 @@ void tridiag_thomas(int n, const double *a, const double *b, const double *c,
         x[i] = (x[i] - b[i] * x[i+1]) / d[i];
 }
 
-/* Allgather the 2x2 Schur pieces [s11 s12 f21 s21 s22 f22], solve the
- * (P-1) reduced tridiagonal system redundantly, return this rank's
- * neighbouring separator values yl (left) and yr (right). */
 static void schur_solve(const double piece[6], double *yl, double *yr,
                         tridiag_times *t)
 {
@@ -61,74 +58,65 @@ static void schur_solve(const double piece[6], double *yl, double *yr,
     if (t) t->t_reduced = msg_wtime() - t0;
 }
 
-/* l_1: b of the left neighbour's separator row (one scalar from rank r-1) */
-static double fetch_left_b(const double *b, int n)
+void tridiag_solve_mpi(int k, const double *a, const double *b,
+                       const double *c, const double *f, double *x,
+                       tridiag_times *t)
 {
+    const int p = msg_rank(), P = num_ranks();
+    const int has_left = p > 0, has_right = p < P - 1;
+    const int n = k - has_right;            /* interior rows */
+    double t0 = msg_wtime();
+
     const int r = msg_rank(), P = num_ranks();
     double l = 0.0, bs = (r < P - 1) ? b[n] : 0.0;
     if (r > 0)     irecv(r - 1, &l, sizeof l, 0);
     if (r < P - 1) isend(r + 1, &bs, sizeof bs, 0);
     msgwait();
-    return l;
-}
 
-/*
- * Handout algorithm: eliminate the extended local matrix (4) in one forward
- * sweep. n interior rows, then (if has_right) the row of the right separator.
- *   u   fill column of the left separator (u_1 = c_1, u_{k+1} = -c_{k+1} u_k)
- *   u_n2 right coupling b_n (no fill: only the last row touches it)
- *   l   rolling entry of the left separator's row (l_{k+1} = -l_k b_k)
- *   l2n coupling c of the right separator's row to x_n
- *   s11 s12 / s21 s22  local 2x2 Schur block, f21 f22 its reduced rhs
- * Inputs are not modified; pinv, f and u of every row are kept for the
- * back substitution.
- */
-void tridiag_solve_mpi(int k, const double *a, const double *b,
-                       const double *c, const double *f, double *x,
-                       tridiag_times *t)
-{
-    const int r = msg_rank(), P = num_ranks();
-    const int has_left = r > 0, has_right = r < P - 1;
-    const int n = k - has_right;            /* interior rows */
-    double t0 = msg_wtime();
+    double *pinv = malloc((size_t)n * sizeof(double));
+    double *fk_s = malloc((size_t)n * sizeof(double));
+    double *uk_s = malloc((size_t)n * sizeof(double));
 
-    double l = fetch_left_b(b, n);          /* l_1 */
-    double *work = malloc(3 * (size_t)n * sizeof(double));
-    double *pinv = work, *fk_s = pinv + n, *uk_s = fk_s + n;
-
-    double u    = has_left ? c[0] : 0.0;    /* u_1 */
-    double u_n2 = has_right ? b[n-1] : 0.0;
+    double u    = has_left  ? c[0] : 0.0;
+    double un2 = has_right ? b[n-1] : 0.0;
     double l2n  = has_right ? c[n] : 0.0;
-    double s11 = 0.0, s12 = 0.0, s21 = 0.0;
-    double s22  = has_right ? a[n] : 0.0;   /* a_{n+1} */
-    double f21 = 0.0, f22 = has_right ? f[n] : 0.0;
-    double ak = a[0], fk = f[0], p_inv, ck;
+    double s11 = 0.0;
+    double s12 = 0.0;
+    double s21 = 0.0;
+    double s22  = has_right ? a[n] : 0.0;
+    double fs1 = 0.0;
+    double fs2 = has_right ? f[n] : 0.0;
+    double ak = a[0];
+    double fk = f[0];
+    double ck = 0.0;
 
     for (int i = 0; i < n - 1; i++) {
-        p_inv = 1.0 / ak;
-        pinv[i] = p_inv; fk_s[i] = fk; uk_s[i] = u;
-        ck = p_inv * c[i+1];                /* multiplier */
+        pinv[i] = 1.0 / ak;
+        fk_s[i] = fk;
+        uk_s[i] = u;
+        ck = pinv[i] * c[i+1];
         ak = a[i+1] - ck * b[i];
         fk = f[i+1] - ck * fk_s[i];
         u  = 0.0 - ck * uk_s[i];
-        l  = p_inv * l;
+        l  = pinv[i] * l;
         s11 -= l * uk_s[i];
-        f21 -= l * fk_s[i];
-        l  = -l * b[i];                     /* l_{k+1} */
+        fs1 -= l * fk_s[i];
+        l  = -l * b[i];
     }
     /* last interior row i = n-1 */
-    p_inv = 1.0 / ak;
-    pinv[n-1] = p_inv; fk_s[n-1] = fk; uk_s[n-1] = u;
-    l    = p_inv * l;
+    pinv[n-1] = 1.0 / ak;
+    fk_s[n-1] = fk;
+    uk_s[n-1] = u;
+    l    = pinv[n-1] * l;
     s11 -= l * u;
-    s12 -= l * u_n2;
-    f21 -= l * fk;
-    l2n  = p_inv * l2n;
+    s12 -= l * un2;
+    fs1 -= l * fk;
+    l2n  = pinv[n-1] * l2n;
     s21 -= l2n * u;
-    s22 -= l2n * u_n2;
-    f22 -= l2n * fk;
+    s22 -= l2n * un2;
+    fs2 -= l2n * fk;
 
-    const double piece[6] = {s11, s12, f21, s21, s22, f22};
+    const double piece[6] = {s11, s12, fs1, s21, s22, fs2};
     double t1 = msg_wtime();
     if (t) t->t_local = t1 - t0;
 
@@ -137,7 +125,7 @@ void tridiag_solve_mpi(int k, const double *a, const double *b,
 
     /* back substitution: fully local */
     t0 = msg_wtime();
-    x[n-1] = (fk_s[n-1] - uk_s[n-1] * yl - u_n2 * yr) * pinv[n-1];
+    x[n-1] = (fk_s[n-1] - uk_s[n-1] * yl - un2 * yr) * pinv[n-1];
     for (int i = n - 2; i >= 0; i--)
         x[i] = (fk_s[i] - b[i] * x[i+1] - uk_s[i] * yl) * pinv[i];
     if (has_right) x[n] = yr;
