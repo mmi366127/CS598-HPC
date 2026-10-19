@@ -11,6 +11,7 @@ static double exact_u(double x, double Lx)
 {
     return sin(M_PI*x/Lx);
 }
+
 static double rhs_f(double x, double Lx)
 {
     return M_PI*M_PI/Lx/Lx*exact_u(x,Lx);
@@ -19,15 +20,20 @@ static double rhs_f(double x, double Lx)
 int main(int argc, char **argv)
 {
     int n = 128, reps = 1;
-    double Lx = 1.0;
-    double h = Lx / (n + 1), h2 = 1.0 / (h * h);
-
 
     msg_init(&argc, &argv);
     if (argc > 1) n = atoi(argv[1]);
     if (argc > 2) reps = atoi(argv[2]);
     int p = msg_rank(), P = num_ranks();
 
+    if (n < 2 * P) {    /* every non-last rank needs >= 1 interior row + separator */
+        if (p == 0) fprintf(stderr, "need n >= 2P (n=%d, P=%d)\n", n, P);
+        msg_finalize();
+        return 1;
+    }
+
+    double Lx = 1.0;
+    double h = Lx / (n + 1), h2 = 1.0 / (h * h);
     int q = n / P, rem = n % P;
     int local_size = q + (p < rem);
     int start_idx = p * q + (p < rem ? p : rem);
@@ -40,6 +46,7 @@ int main(int argc, char **argv)
     double *f = malloc((size_t)local_size * sizeof(double));
     double *x = malloc((size_t)local_size * sizeof(double));
     double *u_exact = malloc((size_t)local_size * sizeof(double));
+
     for (int i = 0; i < local_size; i++) {
         double xi = (start_idx + i + 1) * h;
         a[i] = 2 * h2; b[i] = -h2; c[i] = -h2;
@@ -82,9 +89,9 @@ int main(int argc, char **argv)
     /* max over ranks via zero-padded sum (rank slots) */
     double *s = calloc(14 * (size_t)P, sizeof(double)), *S = s + 7 * P;
     double v[7] = {res, fn, err, un, best, tbest.t_local, tbest.t_comm};
-    for (int j = 0; j < 7; j++) s[j * P + r] = v[j];
+    for (int j = 0; j < 7; j++) s[j * P + p] = v[j];
     gsum_double(s, S, 7 * P);
-    if (r == 0) {
+    if (p == 0) {
         double mx[7] = {0};
         for (int j = 0; j < 7; j++)
             for (int q = 0; q < P; q++) mx[j] = fmax(mx[j], S[j * P + q]);
@@ -94,8 +101,15 @@ int main(int argc, char **argv)
         printf("time %.6e s  [local %.3e  allgather %.3e  (rank0: reduced %.3e  back %.3e)]\n",
                mx[4], mx[5], mx[6], tbest.t_reduced, tbest.t_back);
     }
+
     free(s);
-    free(buf);
+    free(a);
+    free(b);
+    free(c);
+    free(f);
+    free(x);
+    free(u_exact);
+
     msg_finalize();
     return 0;
 }
