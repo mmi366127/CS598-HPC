@@ -26,7 +26,7 @@ int main(int argc, char **argv)
     msg_init(&argc, &argv);
     if (argc > 1) n = atoi(argv[1]);
     if (argc > 2) reps = atoi(argv[2]);
-    int r = msg_rank(), P = num_ranks();
+    int p = msg_rank(), P = num_ranks();
 
     int q = n / P, rem = n % P;
     int local_size = q + (p < rem);
@@ -40,8 +40,8 @@ int main(int argc, char **argv)
     double *f = malloc((size_t)local_size * sizeof(double));
     double *x = malloc((size_t)local_size * sizeof(double));
     double *u_exact = malloc((size_t)local_size * sizeof(double));
-    for (int i = 0; i < k; i++) {
-        double xi = (start + i + 1) * h;
+    for (int i = 0; i < local_size; i++) {
+        double xi = (start_idx + i + 1) * h;
         a[i] = 2 * h2; b[i] = -h2; c[i] = -h2;
         f[i] = rhs_f(xi, Lx);
         u_exact[i] = exact_u(xi, Lx);
@@ -52,29 +52,31 @@ int main(int argc, char **argv)
     for (int it = 0; it < reps; it++) {
         msg_barrier();
         double t0 = msg_wtime();
-        tridiag_solve_mpi(k, a, b, c, f, x, &t);
+        tridiag_solve_mpi(local_size, a, b, c, f, x, &t);
         double dt = msg_wtime() - t0;
         if (dt < best) { best = dt; tbest = t; }
     }
 
-    /* residual ||Ax - f||_inf: halo exchange of neighbour boundary values */
-    double lh = 0.0, rh = 0.0, xfirst = x[0], xlast = x[k-1];
+
+    // calculate error
+    double lh = 0.0, rh = 0.0, ufirst = u[0], ulast = u[local_size-1];
     if (r > 0)     irecv(r - 1, &lh, sizeof lh, 1);
     if (r < P - 1) irecv(r + 1, &rh, sizeof rh, 2);
-    if (r > 0)     isend(r - 1, &xfirst, sizeof xfirst, 2);
-    if (r < P - 1) isend(r + 1, &xlast, sizeof xlast, 1);
+    if (r > 0)     isend(r - 1, &ufirst, sizeof ufirst, 2);
+    if (r < P - 1) isend(r + 1, &ulast, sizeof ulast, 1);
     msgwait();
 
     double res = 0, fn = 0, err = 0, un = 0;
-    for (int i = 0; i < k; i++) {
-        double xm = i > 0 ? x[i-1] : lh, xp = i < k - 1 ? x[i+1] : rh;
-        double ax = a[i] * x[i];
-        if (start + i > 0)     ax += c[i] * xm;
-        if (start + i < n - 1) ax += b[i] * xp;
+    for (int i = 0; i < local_size; i++) {
+        double um = i > 0 ? u[i-1] : lh;
+        double up = i < local_size - 1 ? u[i+1] : rh;
+        double au = a[i] * u[i];
+        if (start_idx + i > 0)     au += c[i] * um;
+        if (start_idx + i < n - 1) au += b[i] * up;
         res = fmax(res, fabs(ax - f[i]));
         fn  = fmax(fn, fabs(f[i]));
-        err = fmax(err, fabs(x[i] - ue[i]));
-        un  = fmax(un, fabs(ue[i]));
+        err = fmax(err, fabs(u[i] - u_exact[i]));
+        un  = fmax(un, fabs(u_exact[i]));
     }
 
     /* max over ranks via zero-padded sum (rank slots) */

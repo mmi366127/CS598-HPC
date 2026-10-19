@@ -23,7 +23,7 @@ void tridiag_solve_mpi(int k, const double *a, const double *b,
                        const double *c, const double *f, double *x,
                        tridiag_times *t)
 {
-    const int r = msg_rank(), P = num_ranks();
+    const int p = msg_rank(), P = num_ranks();
     const int has_left = r > 0, has_right = r < P - 1;
     const int m = k - has_right;            /* interior rows */
     double t0 = msg_wtime(), t1;
