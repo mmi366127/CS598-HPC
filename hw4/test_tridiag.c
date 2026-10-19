@@ -16,35 +16,35 @@ static double rhs_f(double x, double Lx)
     return M_PI*M_PI/Lx/Lx*exact_u(x,Lx);
 }
 
-/* usage: test_tridiag [n] [reps]   (n interior grid points, default 128) */
 int main(int argc, char **argv)
 {
     int n = 128, reps = 1;
     double Lx = 1.0;
+    double h = Lx / (n + 1), h2 = 1.0 / (h * h);
+
 
     msg_init(&argc, &argv);
     if (argc > 1) n = atoi(argv[1]);
     if (argc > 2) reps = atoi(argv[2]);
     int r = msg_rank(), P = num_ranks();
 
-    int start, k;
-    tridiag_layout(n, P, r, &start, &k);
-    if (k < 2 && r < P - 1) {
-        if (r == 0) fprintf(stderr, "need n >= 2P\n");
-        msg_finalize();
-        return 1;
-    }
+    int q = n / P, rem = n % P;
+    int local_size = q + (p < rem);
+    int start_idx = p * q + (p < rem ? p : rem);
 
-    /* Dirichlet 1D Poisson: x_i = (i+1) h, h = Lx/(n+1), A = tridiag(-1,2,-1)/h^2 */
-    double h = Lx / (n + 1), h2 = 1.0 / (h * h);
-    double *buf = malloc(6 * (size_t)k * sizeof(double));
-    double *a = buf, *b = a + k, *c = b + k, *f = c + k, *x = f + k;
-    double *ue = x + k;
+
+    // Init a,b,c,f,u_exact
+    double *a = malloc((size_t)local_size * sizeof(double));
+    double *b = malloc((size_t)local_size * sizeof(double));
+    double *c = malloc((size_t)local_size * sizeof(double));
+    double *f = malloc((size_t)local_size * sizeof(double));
+    double *x = malloc((size_t)local_size * sizeof(double));
+    double *u_exact = malloc((size_t)local_size * sizeof(double));
     for (int i = 0; i < k; i++) {
         double xi = (start + i + 1) * h;
         a[i] = 2 * h2; b[i] = -h2; c[i] = -h2;
         f[i] = rhs_f(xi, Lx);
-        ue[i] = exact_u(xi, Lx);
+        u_exact[i] = exact_u(xi, Lx);
     }
 
     tridiag_times t = {0}, tbest = {0};
@@ -65,7 +65,6 @@ int main(int argc, char **argv)
     if (r < P - 1) isend(r + 1, &xlast, sizeof xlast, 1);
     msgwait();
 
-    
     double res = 0, fn = 0, err = 0, un = 0;
     for (int i = 0; i < k; i++) {
         double xm = i > 0 ? x[i-1] : lh, xp = i < k - 1 ? x[i+1] : rh;

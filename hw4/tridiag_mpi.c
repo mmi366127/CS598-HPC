@@ -3,13 +3,6 @@
 #include "msg.h"
 #include "tridiag_mpi.h"
 
-void tridiag_layout(int n, int P, int p, int *start, int *k)
-{
-    int q = n / P, rem = n % P;
-    *k = q + (p < rem);
-    *start = p * q + (p < rem ? p : rem);
-}
-
 void tridiag_thomas(int n, const double *a, const double *b, const double *c,
                     const double *f, double *x, double *d)
 {
