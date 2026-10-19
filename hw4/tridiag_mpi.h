@@ -12,4 +12,7 @@ void tridiag_solve_mpi(int k, const double *a, const double *b,
                        const double *c, const double *f, double *x,
                        tridiag_times *t);
 
+void tridiag_thomas(int n, const double *a, const double *b, const double *c,
+                    const double *f, double *x, double *work);
+
 #endif

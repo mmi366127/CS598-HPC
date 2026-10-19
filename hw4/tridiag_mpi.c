@@ -22,7 +22,7 @@ void tridiag_thomas(int n, const double *a, const double *b, const double *c,
 static void schur_solve(const double piece[6], double *yl, double *yr,
                         tridiag_times *t)
 {
-    const int r = msg_rank(), P = num_ranks();
+    const int p = msg_rank(), P = num_ranks();
     double t0 = msg_wtime(), t1;
     *yl = *yr = 0.0;
     if (P == 1) {
@@ -32,7 +32,7 @@ static void schur_solve(const double piece[6], double *yl, double *yr,
     /* allgather via sum of zero-padded slots */
     double *mine = calloc(12 * (size_t)P, sizeof(double));
     double *all  = mine + 6 * P;
-    memcpy(mine + 6 * r, piece, 6 * sizeof(double));
+    memcpy(mine + 6 * p, piece, 6 * sizeof(double));
     gsum_double(mine, all, 6 * P);
     t1 = msg_wtime();
     if (t) t->t_comm = t1 - t0;
@@ -51,8 +51,8 @@ static void schur_solve(const double piece[6], double *yl, double *yr,
         sf[j] = Gj[5] + Gn[2];
     }
     tridiag_thomas(ns, sa, sb, sc, sf, y, sw);
-    if (r > 0)      *yl = y[r - 1];
-    if (r < P - 1)  *yr = y[r];
+    if (p > 0)      *yl = y[p - 1];
+    if (p < P - 1)  *yr = y[p];
     free(mine);
     free(rd);
     if (t) t->t_reduced = msg_wtime() - t0;
@@ -67,15 +67,22 @@ void tridiag_solve_mpi(int k, const double *a, const double *b,
     const int n = k - has_right;            /* interior rows */
     double t0 = msg_wtime();
 
-    const int r = msg_rank(), P = num_ranks();
-    double l = 0.0, bs = (r < P - 1) ? b[n] : 0.0;
-    if (r > 0)     irecv(r - 1, &l, sizeof l, 0);
-    if (r < P - 1) isend(r + 1, &bs, sizeof bs, 0);
+    /* l_1: b of the left neighbour's separator row (one scalar from rank p-1) */
+    double l = 0.0, bs = has_right ? b[n] : 0.0;
+    if (has_left)  irecv(p - 1, &l, sizeof l, 0);
+    if (has_right) isend(p + 1, &bs, sizeof bs, 0);
     msgwait();
 
-    double *pinv = malloc((size_t)n * sizeof(double));
-    double *fk_s = malloc((size_t)n * sizeof(double));
-    double *uk_s = malloc((size_t)n * sizeof(double));
+    /* work buffer is kept between calls: re-allocating (and page-faulting)
+     * 3n doubles on every solve would dominate the timing for large n */
+    static double *work = NULL;
+    static size_t work_cap = 0;
+    if ((size_t)n > work_cap) {
+        free(work);
+        work = malloc(3 * (size_t)n * sizeof(double));
+        work_cap = (size_t)n;
+    }
+    double *pinv = work, *fk_s = pinv + n, *uk_s = fk_s + n;
 
     double u    = has_left  ? c[0] : 0.0;
     double un2 = has_right ? b[n-1] : 0.0;
@@ -130,5 +137,4 @@ void tridiag_solve_mpi(int k, const double *a, const double *b,
         x[i] = (fk_s[i] - b[i] * x[i+1] - uk_s[i] * yl) * pinv[i];
     if (has_right) x[n] = yr;
     if (t) t->t_back = msg_wtime() - t0;
-    free(work);
 }
