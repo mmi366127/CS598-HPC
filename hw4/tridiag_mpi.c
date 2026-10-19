@@ -73,16 +73,21 @@ void tridiag_solve_mpi(int k, const double *a, const double *b,
     if (has_right) isend(p + 1, &bs, sizeof bs, 0);
     msgwait();
 
-    /* work buffer is kept between calls: re-allocating (and page-faulting)
-     * 3n doubles on every solve would dominate the timing for large n */
-    static double *work = NULL;
+
+    static double *pinv = NULL;
+    static double *fk_s = NULL;
+    static double *uk_s = NULL;
+
     static size_t work_cap = 0;
     if ((size_t)n > work_cap) {
-        free(work);
-        work = malloc(3 * (size_t)n * sizeof(double));
+        free(pinv);
+        free(fk_s);
+        free(uk_s);
+        double *pinv = malloc((size_t)n * sizeof(double));
+        double *fk_s = malloc((size_t)n * sizeof(double));
+        double *uk_s = malloc((size_t)n * sizeof(double));
         work_cap = (size_t)n;
     }
-    double *pinv = work, *fk_s = pinv + n, *uk_s = fk_s + n;
 
     double u    = has_left  ? c[0] : 0.0;
     double un2 = has_right ? b[n-1] : 0.0;
