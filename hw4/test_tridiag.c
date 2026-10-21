@@ -61,7 +61,8 @@ int main(int argc, char **argv)
     for (int it = 0; it < reps; it++) {
         msg_barrier();
         double t0 = msg_wtime();
-        tridiag_solve_mpi(local_size, a, b, c, f, x, &t);
+        tridiag_factor_mpi(local_size, a, b, c, &t);
+        tridiag_substitute_mpi(local_size, b, c, f, x, &t);
         double dt = msg_wtime() - t0;
         if (dt < best) { best = dt; tbest = t; }
     }
